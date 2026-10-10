@@ -101,21 +101,15 @@ export async function saveRecipe(
   recipe: Recipe,
   sourceIngredients: SourceIngredient[],
 ): Promise<{ id: string }> {
-  const [{ total }] = await db.select({ total: count() }).from(savedRecipes).where(eq(savedRecipes.userId, userId));
-  if (total >= MAX_SAVED) throw new LimitError(`max ${MAX_SAVED} saved recipes`);
-
   const id = crypto.randomUUID();
   try {
-    await db.insert(savedRecipes).values({
-      id,
-      userId,
-      recipeId: recipe.id,
-      title: recipe.title,
-      cuisine: recipe.cuisine,
-      recipeJson: JSON.stringify(recipe),
-      sourceIngredients: JSON.stringify(sourceIngredients),
-      createdAt: Date.now(),
-    });
+    // 개수 확인과 삽입을 한 문장으로 처리한다. 따로 하면 동시에 들어온 요청들이 모두 확인을 통과해 한도를 넘길 수 있다.
+    const result = await db.run(sql`
+      INSERT INTO saved_recipes (id, user_id, recipe_id, title, cuisine, recipe_json, source_ingredients, created_at)
+      SELECT ${id}, ${userId}, ${recipe.id}, ${recipe.title}, ${recipe.cuisine}, ${JSON.stringify(recipe)},
+             ${JSON.stringify(sourceIngredients)}, ${Date.now()}
+      WHERE (SELECT count(*) FROM saved_recipes WHERE user_id = ${userId}) < ${MAX_SAVED}`);
+    if (result.rowsAffected === 0) throw new LimitError(`max ${MAX_SAVED} saved recipes`);
   } catch (e) {
     if (isUniqueViolation(e)) throw new DuplicateError("recipe already saved");
     throw e;

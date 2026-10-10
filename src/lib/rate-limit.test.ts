@@ -15,6 +15,15 @@ describe("createRateLimiter", () => {
     expect(limiter.isLimited("ip:1")).toBe(false);
   });
 
+  it("reset forgets only the given keys", () => {
+    const limiter = createRateLimiter({ limit: 1, windowMs: 1000, now: () => 0 });
+    limiter.hit("ip:a", "email:x");
+    expect(limiter.isLimited("email:x")).toBe(true);
+    limiter.reset("email:x");
+    expect(limiter.isLimited("email:x")).toBe(false);
+    expect(limiter.isLimited("ip:a")).toBe(true);
+  });
+
   it("forgets expired keys once it grows past the sweep threshold", () => {
     let clock = 0;
     const limiter = createRateLimiter({ limit: 3, windowMs: 1000, now: () => clock, sweepAt: 5 });

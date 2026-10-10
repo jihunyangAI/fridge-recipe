@@ -6,11 +6,13 @@ vi.mock("@/lib/db", async (orig) => ({ ...(await orig<typeof import("@/lib/db")>
 
 const profileRoute = await import("./route");
 const register = await import("../auth/register/route");
+const { registerLimiter } = await import("@/lib/rate-limit");
 const { createUser, findUserByEmail, saveRecipe, listSavedRecipes } = await import("@/lib/db/repo");
 
 describe("POST /api/auth/register", () => {
   beforeEach(async () => {
     await testDb.reset();
+    registerLimiter.clear();
   });
 
   it("creates a user with a bcrypt hash and a default profile", async () => {

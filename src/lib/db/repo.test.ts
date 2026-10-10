@@ -93,6 +93,17 @@ describe("saved recipes", () => {
     await expect(saveRecipe(db, bob, recipe("one-more"), [])).resolves.toHaveProperty("id");
   });
 
+  it("never exceeds the limit when saves arrive at the same time", async () => {
+    for (let i = 0; i < MAX_SAVED - 2; i++) await saveRecipe(db, alice, recipe(`r${i}`), []);
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, i) => saveRecipe(db, alice, recipe(`race${i}`), [])),
+    );
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(rejected.every((r) => r.reason instanceof LimitError)).toBe(true);
+    expect((await listSavedRecipes(db, alice, {})).total).toBe(MAX_SAVED);
+  });
+
   it("lists newest first with title search, cuisine filter and 20 per page", async () => {
     for (let i = 0; i < 25; i++) await saveRecipe(db, alice, recipe(`r${i}`, `요리 ${i}`, i % 2 ? "양식" : "한식"), []);
     await saveRecipe(db, alice, recipe("x", "100% 계란말이"), []);

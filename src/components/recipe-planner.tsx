@@ -199,6 +199,9 @@ export function RecipePlanner() {
         <button type="button" onClick={() => generate(false)} disabled={loading} className="btn-primary">
           {loading ? "레시피를 만드는 중…" : current ? "이 조건으로 다시 만들기" : "레시피 만들기"}
         </button>
+        {current && !loading && (
+          <p className="-mt-2 text-xs text-zinc-500">지금 결과를 지우고 위 조건으로 처음부터 새로 만들어요.</p>
+        )}
         {loading && slow && (
           <p className="text-sm text-amber-600" role="status">
             요청이 많아 다시 시도하는 중이에요. 최대 1분 정도 걸릴 수 있어요…
@@ -248,9 +251,12 @@ export function RecipePlanner() {
                     {notice}
                   </p>
                 )}
-                <button type="button" onClick={() => generate(true)} className="btn-secondary self-center">
-                  다른 레시피 보기
-                </button>
+                <div className="flex flex-col items-center gap-1">
+                  <button type="button" onClick={() => generate(true)} className="btn-secondary">
+                    다른 레시피 보기
+                  </button>
+                  <p className="text-xs text-zinc-500">같은 조건으로, 지금까지 본 것과 다른 레시피를 추천해요.</p>
+                </div>
               </>
             )}
           </section>
