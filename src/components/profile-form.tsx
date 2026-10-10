@@ -1,24 +1,33 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { api, ApiError } from "@/lib/api-client";
 import { ALLERGEN_OPTIONS, DIET_TYPES, type Profile } from "@/lib/profile";
 import { SERVINGS } from "@/lib/recipes";
-import { useProfile, useRequireAuth } from "@/lib/use-auth";
+import { clearPrivateSession } from "@/lib/private-session";
+import { useProfileState, useRequireAuth } from "@/lib/use-auth";
 import { ErrorText, Field } from "./auth-forms";
 
 export function ProfilePage() {
   const status = useRequireAuth();
-  const profile = useProfile();
+  const { profile, error, retry } = useProfileState();
+  if (status === "authenticated" && error) {
+    return (
+      <div className="flex flex-col items-start gap-3">
+        <ErrorText>프로필을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.</ErrorText>
+        <button type="button" onClick={retry} className="btn-secondary">
+          다시 시도
+        </button>
+      </div>
+    );
+  }
   if (status !== "authenticated" || !profile) return <p className="text-zinc-500">불러오는 중…</p>;
   // 불러온 값으로 폼을 한 번만 초기화한다.
   return <ProfileForm initial={profile} />;
 }
 
 function ProfileForm({ initial }: { initial: Profile }) {
-  const router = useRouter();
   const [form, setForm] = useState<Profile>(initial);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -107,14 +116,23 @@ function ProfileForm({ initial }: { initial: Profile }) {
       </form>
 
       <section className="flex flex-col gap-3 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-        <button type="button" onClick={() => signOut({ redirectTo: "/" })} className="btn-secondary self-start">
+        <button
+          type="button"
+          onClick={() => {
+            clearPrivateSession();
+            void signOut({ redirectTo: "/" });
+          }}
+          className="btn-secondary self-start"
+        >
           로그아웃
         </button>
         <DeleteAccount
           onDeleted={async () => {
-            await signOut({ redirect: false });
-            router.replace("/");
-            router.refresh();
+            // 계정은 이미 지워졌다. 로그아웃 처리가 실패해도 삭제 실패로 보이지 않게 하고 첫 화면으로 보낸다.
+            // (남은 로그인 토큰은 다음 API 호출의 401에서 정리된다.)
+            // redirect: false로 세션만 갱신하면 useRequireAuth가 먼저 로그인 화면으로 보내므로, 페이지 이동으로 로그아웃한다.
+            clearPrivateSession();
+            await signOut({ redirectTo: "/" }).catch(() => window.location.replace("/"));
           }}
         />
       </section>
@@ -137,23 +155,25 @@ function DeleteAccount({ onDeleted }: { onDeleted: () => Promise<void> }) {
     <div className="flex flex-col gap-2 rounded-xl border border-red-200 p-3 dark:border-red-900">
       <p className="text-sm">계정을 삭제하면 프로필과 저장한 레시피가 모두 지워지고 되돌릴 수 없어요.</p>
       {error && <ErrorText>{error}</ErrorText>}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
+        {/* 안전한 선택(취소)을 먼저, 크게 두고 위험한 삭제는 윤곽선만 있는 버튼으로 낮춘다. */}
+        <button type="button" onClick={() => setConfirming(false)} className="btn-secondary font-semibold">
+          취소
+        </button>
         <button
           type="button"
           onClick={async () => {
             try {
               await api("/api/profile", { method: "DELETE" });
-              await onDeleted();
             } catch (err) {
               setError(err instanceof ApiError ? err.message : "삭제하지 못했어요.");
+              return;
             }
+            await onDeleted();
           }}
-          className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white"
+          className="rounded-xl border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40"
         >
           계정 영구 삭제
-        </button>
-        <button type="button" onClick={() => setConfirming(false)} className="btn-secondary">
-          취소
         </button>
       </div>
     </div>

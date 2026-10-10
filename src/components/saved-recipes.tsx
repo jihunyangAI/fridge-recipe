@@ -39,6 +39,11 @@ export function SavedRecipeList() {
   }, [status, query]);
 
   if (status !== "authenticated") return <p className="text-zinc-500">불러오는 중…</p>;
+  // 페이지를 넘기면 새 목록의 맨 위부터 보이게 한다.
+  const goToPage = (page: number) => {
+    setQuery((q) => ({ ...q, page }));
+    window.scrollTo({ top: 0 });
+  };
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const filtered = !!(query.q || query.cuisine);
 
@@ -119,7 +124,7 @@ export function SavedRecipeList() {
               <button
                 type="button"
                 disabled={query.page <= 1}
-                onClick={() => setQuery((q) => ({ ...q, page: q.page - 1 }))}
+                onClick={() => goToPage(query.page - 1)}
                 className="btn-secondary"
               >
                 이전
@@ -130,7 +135,7 @@ export function SavedRecipeList() {
               <button
                 type="button"
                 disabled={query.page >= pages}
-                onClick={() => setQuery((q) => ({ ...q, page: q.page + 1 }))}
+                onClick={() => goToPage(query.page + 1)}
                 className="btn-secondary"
               >
                 다음
@@ -249,7 +254,10 @@ function DeleteSaved({ savedId, onDeleted }: { savedId: string; onDeleted: () =>
     <div className="flex flex-col gap-2 rounded-xl border border-red-200 p-3 dark:border-red-900">
       <p className="text-sm">이 레시피를 내 레시피에서 삭제할까요?</p>
       {error && <ErrorText>{error}</ErrorText>}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => setConfirming(false)} className="btn-secondary font-semibold">
+          취소
+        </button>
         <button
           type="button"
           onClick={async () => {
@@ -260,12 +268,9 @@ function DeleteSaved({ savedId, onDeleted }: { savedId: string; onDeleted: () =>
               setError(e instanceof ApiError ? e.message : "삭제하지 못했어요.");
             }
           }}
-          className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white"
+          className="rounded-xl border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40"
         >
           삭제
-        </button>
-        <button type="button" onClick={() => setConfirming(false)} className="btn-secondary">
-          취소
         </button>
       </div>
     </div>

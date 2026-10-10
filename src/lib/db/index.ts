@@ -20,7 +20,8 @@ export async function openDb(url = process.env.DATABASE_URL || DEFAULT_URL): Pro
     mkdirSync(dirname(url.slice("file:".length)), { recursive: true });
   }
   const client: Client = createClient({ url });
-  // SQLite는 연결마다 외래 키를 켜야 ON DELETE CASCADE가 동작한다.
+  // SQLite는 연결마다 외래 키 설정이 따로다. libsql은 새 연결에서 기본으로 켜 두지만(ON DELETE CASCADE 동작),
+  // 계정 삭제가 이 설정에 의존하므로 명시해 둔다.
   await client.execute("PRAGMA foreign_keys = ON");
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS });

@@ -48,6 +48,8 @@ export function FridgeRecognizer() {
 
   async function recognize() {
     if (!file) return;
+    // 이미 인식한 목록이 있으면 새 결과가 그 위를 덮어쓰므로, 고친 내용이 사라지기 전에 한 번 묻는다.
+    if (ingredients && ingredients.length > 0 && !window.confirm("지금 목록은 새 인식 결과로 바뀌고, 고친 내용은 사라져요. 다시 인식할까요?")) return;
     setLoading(true);
     setSlow(false);
     setError(null);
@@ -86,6 +88,7 @@ export function FridgeRecognizer() {
   }
 
   function reset() {
+    if (!window.confirm("인식된 재료 목록을 지우고 처음부터 시작할까요?")) return;
     setFile(null);
     setPreviewUrl(null);
     setNotes(null);
@@ -176,8 +179,8 @@ export function FridgeRecognizer() {
         <section className="flex flex-col gap-4">
           <div className="flex items-baseline justify-between">
             <h2 className="text-xl font-semibold">인식된 재료 ({ingredients.length})</h2>
-            <button type="button" onClick={reset} className="text-sm text-zinc-500 underline">
-              처음부터
+            <button type="button" onClick={reset} className="btn-secondary">
+              처음부터 다시
             </button>
           </div>
           {notes && <p className="text-sm text-zinc-500">참고: {notes}</p>}

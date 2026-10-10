@@ -64,11 +64,13 @@ function buildMessages(req: RecipeRequest, profile: Profile | null | undefined):
       식단: profile.dietType === "일반" ? "제한 없음" : profile.dietType,
     }),
   };
+  // 사용자 텍스트에 "</data>"가 들어 있어도 데이터 영역을 빠져나가지 못하도록 "<"를 이스케이프한다. JSON 파서는 똑같이 읽는다.
+  const dataJson = JSON.stringify(data, null, 1).replace(/</g, "\\u003c");
   return [
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "user",
-      content: `다음 재료와 조건으로 레시피 ${RECIPE_COUNT}개를 JSON으로 만들어줘.\n<data>\n${JSON.stringify(data, null, 1)}\n</data>`,
+      content: `다음 재료와 조건으로 레시피 ${RECIPE_COUNT}개를 JSON으로 만들어줘.\n<data>\n${dataJson}\n</data>`,
     },
   ];
 }

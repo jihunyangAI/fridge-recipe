@@ -29,7 +29,11 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
  */
 async function dropStaleSession() {
   if (typeof window === "undefined") return;
-  const { signOut } = await import("next-auth/react");
+  const [{ signOut }, { clearPrivateSession }] = await Promise.all([
+    import("next-auth/react"),
+    import("./private-session"),
+  ]);
+  clearPrivateSession();
   await signOut({ redirectTo: loginUrl(location.pathname + location.search) });
 }
 

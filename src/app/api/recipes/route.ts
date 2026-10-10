@@ -2,6 +2,7 @@ import { optionalUser, rejectCrossOrigin } from "@/lib/api-auth";
 import { errorJson, modelErrorResponse } from "@/lib/api-errors";
 import { getProfile } from "@/lib/db/repo";
 import type { Profile } from "@/lib/profile";
+import { aiLimiter, clientIp, TOO_MANY_REQUESTS } from "@/lib/rate-limit";
 import { generateRecipes } from "@/lib/recipe-generator";
 import { ALLERGY_NOTICE, DIET_NOTICE, recipeRequestSchema, type RecipesResponse } from "@/lib/recipes";
 
@@ -20,6 +21,13 @@ export async function POST(request: Request) {
   const blocked = rejectCrossOrigin(request);
   if (blocked) return blocked;
 
+  // 비로그인도 쓸 수 있다. 로그인했으면 프로필(알레르기·싫어하는 재료·식단)을 반영한다.
+  const user = await optionalUser();
+  // 유료 모델 호출이라 사용자(비로그인이면 IP)별로 분당 횟수를 제한한다.
+  const limiterKey = `recipes:${user ? `user:${user.userId}` : `ip:${clientIp(request) ?? "anon"}`}`;
+  if (aiLimiter.isLimited(limiterKey)) return errorJson(429, TOO_MANY_REQUESTS);
+  aiLimiter.hit(limiterKey);
+
   let body: unknown;
   try {
     body = await request.json();
@@ -32,8 +40,6 @@ export async function POST(request: Request) {
     return errorJson(400, "재료는 1~50개, 이름은 30자 이하로 보내 주세요.");
   }
 
-  // 비로그인도 쓸 수 있다. 로그인했으면 프로필(알레르기·싫어하는 재료·식단)을 반영한다.
-  const user = await optionalUser();
   const profile = user ? await getProfile(user.db, user.userId) : null;
 
   try {

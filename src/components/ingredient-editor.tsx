@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { CATEGORIES, type Category, type Ingredient } from "@/lib/ingredients";
 
+// /api/recipes가 받는 재료 수의 상한과 같다.
+const MAX_INGREDIENTS = 50;
+
 type Props = {
   ingredients: Ingredient[];
   onChange: (next: Ingredient[]) => void;
@@ -36,6 +39,7 @@ export function IngredientEditor({ ingredients, onChange }: Props) {
                   <input
                     aria-label="재료 이름"
                     value={item.name}
+                    maxLength={30}
                     // 사용자가 이름을 고쳤다면 확인한 것으로 본다.
                     onChange={(e) => update(index, { name: e.target.value, confidence: "high" })}
                     onBlur={(e) => {
@@ -60,7 +64,7 @@ export function IngredientEditor({ ingredients, onChange }: Props) {
                   type="button"
                   onClick={() => remove(index)}
                   aria-label={`${item.name} 삭제`}
-                  className="shrink-0 self-start rounded-lg px-2 py-2 text-zinc-400 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800"
+                  className="shrink-0 self-start rounded-lg px-3 py-2 text-zinc-400 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800"
                 >
                   ✕
                 </button>
@@ -69,12 +73,15 @@ export function IngredientEditor({ ingredients, onChange }: Props) {
           </ul>
         </div>
       ))}
-      <AddIngredientForm onAdd={(item) => onChange([...ingredients, item])} />
+      <p className="text-xs text-zinc-500">
+        재료 이름을 지우면 그 재료가 목록에서 빠져요. ({ingredients.length}/{MAX_INGREDIENTS}개)
+      </p>
+      <AddIngredientForm full={ingredients.length >= MAX_INGREDIENTS} onAdd={(item) => onChange([...ingredients, item])} />
     </div>
   );
 }
 
-function AddIngredientForm({ onAdd }: { onAdd: (item: Ingredient) => void }) {
+function AddIngredientForm({ onAdd, full }: { onAdd: (item: Ingredient) => void; full: boolean }) {
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
   const [category, setCategory] = useState<Category>("기타");
@@ -84,7 +91,7 @@ function AddIngredientForm({ onAdd }: { onAdd: (item: Ingredient) => void }) {
       onSubmit={(e) => {
         e.preventDefault();
         const trimmed = name.trim();
-        if (!trimmed) return;
+        if (!trimmed || full) return;
         // 사용자가 직접 넣은 재료는 확실한 것으로 본다.
         onAdd({ name: trimmed, quantity: quantity.trim() || null, category, confidence: "high" });
         setName("");
@@ -117,9 +124,14 @@ function AddIngredientForm({ onAdd }: { onAdd: (item: Ingredient) => void }) {
           <option key={c}>{c}</option>
         ))}
       </select>
-      <button type="submit" disabled={!name.trim()} className="btn-secondary">
+      <button type="submit" disabled={!name.trim() || full} className="btn-secondary">
         추가
       </button>
+      {full && (
+        <p role="status" className="w-full text-sm text-amber-700 dark:text-amber-300">
+          재료는 {MAX_INGREDIENTS}개까지 넣을 수 있어요. 안 쓰는 재료를 지우고 추가해 주세요.
+        </p>
+      )}
     </form>
   );
 }

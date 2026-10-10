@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { api, ApiError, loginUrl } from "@/lib/api-client";
+import { PENDING_SAVE_KEY as PENDING_KEY } from "@/lib/private-session";
 import type { Recipe, SourceIngredient } from "@/lib/recipes";
 
-// 비로그인 상태에서 "저장"을 누르면 이 키에 레시피 id를 남기고 로그인 화면으로 보낸다.
+// 비로그인 상태에서 "저장"을 누르면 PENDING_KEY에 레시피 id를 남기고 로그인 화면으로 보낸다.
 // 로그인 후 레시피 화면으로 돌아오면 같은 레시피의 SaveButton이 이어서 저장한다.
-const PENDING_KEY = "fridge:pendingSave";
 
 type State = { kind: "idle" | "saving" | "saved" } | { kind: "error"; message: string };
 
@@ -93,13 +94,18 @@ export function SaveButton({ recipe, sourceIngredients }: { recipe: Recipe; sour
       >
         {state.kind === "saved" ? "✓ 저장됨" : state.kind === "saving" ? "저장 중…" : "레시피 저장"}
       </button>
+      {state.kind === "saved" && (
+        <Link href="/my-recipes" className="text-sm text-emerald-700 underline dark:text-emerald-400">
+          내 레시피에서 보기 →
+        </Link>
+      )}
       {state.kind === "error" && (
         <p role="alert" className="text-sm text-red-600">
           {state.message}
         </p>
       )}
       {status === "unauthenticated" && state.kind === "idle" && (
-        <p className="text-xs text-zinc-500">저장하려면 로그인이 필요해요.</p>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">저장하려면 로그인이 필요해요. 누르면 로그인 화면으로 이동해요.</p>
       )}
     </div>
   );

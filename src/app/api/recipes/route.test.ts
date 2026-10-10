@@ -11,6 +11,7 @@ vi.mock("@/auth", () => ({ auth: () => testAuth.session() }));
 vi.mock("@/lib/db", async (orig) => ({ ...(await orig<typeof import("@/lib/db")>()), getDb: () => testDb.get() }));
 
 const { POST } = await import("./route");
+const { aiLimiter } = await import("@/lib/rate-limit");
 const { createUser, updateProfile } = await import("@/lib/db/repo");
 
 const post = (body: unknown) =>
@@ -24,6 +25,7 @@ const post = (body: unknown) =>
 
 describe("POST /api/recipes", () => {
   beforeEach(() => {
+    aiLimiter.clear();
     generateRecipes.mockReset();
     testAuth.signInAs(null);
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -39,6 +41,20 @@ describe("POST /api/recipes", () => {
       excludeTitles: [],
     });
     expect(generateRecipes.mock.calls[0][2]).toBeNull();
+  });
+
+  it("limits calls to 10 per minute per user (or IP when logged out) with 429", async () => {
+    generateRecipes.mockResolvedValue([]);
+    for (let i = 0; i < 10; i++) expect((await post({ ingredients: [{ name: "계란" }] })).status).toBe(200);
+    const res = await post({ ingredients: [{ name: "계란" }] });
+    expect(res.status).toBe(429);
+    expect(generateRecipes).toHaveBeenCalledTimes(10);
+
+    // 로그인한 사용자는 비로그인(IP) 칸과 별개로 센다.
+    const db = await testDb.reset();
+    const { id } = await createUser(db, { email: "limit@x.com", passwordHash: "h", nickname: "리밋" });
+    testAuth.signInAs(id);
+    expect((await post({ ingredients: [{ name: "계란" }] })).status).toBe(200);
   });
 
   it("passes the logged-in user's profile and shows the matching notice", async () => {

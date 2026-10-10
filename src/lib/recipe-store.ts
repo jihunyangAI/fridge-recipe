@@ -21,8 +21,27 @@ export type RecipeSession = {
 
 const store = createSessionStore(
   "fridge:recipes",
-  (v): v is RecipeSession =>
-    typeof v === "object" && v !== null && Array.isArray((v as RecipeSession).recipes),
+  (v): v is RecipeSession => {
+    if (typeof v !== "object" || v === null) return false;
+    const s = v as Partial<RecipeSession>;
+    return (
+      typeof s.ingredientsKey === "string" &&
+      typeof s.options === "object" &&
+      s.options !== null &&
+      Array.isArray(s.seenTitles) &&
+      s.seenTitles.every((t) => typeof t === "string") &&
+      Array.isArray(s.recipes) &&
+      s.recipes.every(
+        (r) =>
+          typeof r === "object" &&
+          r !== null &&
+          typeof r.id === "string" &&
+          typeof r.title === "string" &&
+          Array.isArray(r.ingredients) &&
+          Array.isArray(r.steps),
+      )
+    );
+  },
 );
 
 export const saveRecipeSession = store.save;

@@ -11,6 +11,7 @@ vi.mock("@/lib/recognize", async (importOriginal) => ({
 }));
 
 const { POST } = await import("./route");
+const { aiLimiter } = await import("@/lib/rate-limit");
 const { ModelOutputError } = await import("@/lib/openrouter");
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
@@ -29,6 +30,7 @@ function post(file?: Blob, name = "fridge.jpg", origin: string | null = "http://
 
 describe("POST /api/recognize", () => {
   beforeEach(() => {
+    aiLimiter.clear();
     recognizeIngredients.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -65,6 +67,41 @@ describe("POST /api/recognize", () => {
     big.set(JPEG);
     const res = await post(new Blob([big], { type: "image/jpeg" }));
     expect(res.status).toBe(400);
+  });
+
+  it("rejects an oversized upload with 413 before reading the body", async () => {
+    const form = new FormData();
+    form.append("image", new Blob([JPEG], { type: "image/jpeg" }), "fridge.jpg");
+    const res = await POST(
+      new Request("http://localhost/api/recognize", {
+        method: "POST",
+        body: form,
+        headers: { origin: "http://localhost", host: "localhost", "content-length": String(12 * 1024 * 1024) },
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toContain("10MB");
+    expect(recognizeIngredients).not.toHaveBeenCalled();
+  });
+
+  it("limits calls per IP to 10 per minute with 429 before calling the model", async () => {
+    recognizeIngredients.mockResolvedValue({ ingredients: [], notes: null });
+    const send = (ip: string) => {
+      const form = new FormData();
+      form.append("image", new Blob([JPEG], { type: "image/jpeg" }), "fridge.jpg");
+      return POST(
+        new Request("http://localhost/api/recognize", {
+          method: "POST",
+          body: form,
+          headers: { origin: "http://localhost", host: "localhost", "x-forwarded-for": ip },
+        }),
+      );
+    };
+    for (let i = 0; i < 10; i++) expect((await send("198.51.100.1")).status).toBe(200);
+    const res = await send("198.51.100.1");
+    expect(res.status).toBe(429);
+    expect(recognizeIngredients).toHaveBeenCalledTimes(10);
+    expect((await send("198.51.100.2")).status).toBe(200);
   });
 
   it("maps exhausted 429 retries to 503", async () => {

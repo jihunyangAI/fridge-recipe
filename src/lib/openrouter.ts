@@ -43,6 +43,8 @@ export const DEFAULT_BUDGET_MS = 50_000;
 // 남은 시간이 이보다 적으면 새 요청을 시작하지 않는다.
 const MIN_ATTEMPT_MS = 3_000;
 
+const RETRYABLE_STATUSES = new Set([429, 502, 503, NETWORK_ERROR]);
+
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
@@ -73,8 +75,9 @@ export async function chatCompletion(
       const timeout = Math.min(attemptTimeoutMs, remaining());
       return await chatOnce(fetchImpl, apiKey, buildBody(model, messages, format), timeout);
     } catch (e) {
-      // 429(상위 제공자 혼잡)와 일시적인 연결 끊김은 다시 시도한다. 시간 초과는 다시 해도 남은 시간이 부족하다.
-      const retryable = e instanceof OpenRouterError && (e.status === 429 || e.status === NETWORK_ERROR);
+      // 429(상위 제공자 혼잡), 502/503(상위 제공자 일시 장애)과 일시적인 연결 끊김은 다시 시도한다.
+      // 시간 초과는 다시 해도 남은 시간이 부족하다. 재시도도 위의 마감 시각 안에서만 한다.
+      const retryable = e instanceof OpenRouterError && RETRYABLE_STATUSES.has(e.status);
       const delay = retryDelaysMs[attempt];
       if (!retryable || delay === undefined || remaining() - delay < MIN_ATTEMPT_MS) throw e;
       await sleep(delay);
@@ -120,7 +123,17 @@ async function chatOnce(
     throw new OpenRouterError(timedOut ? 504 : NETWORK_ERROR, `OpenRouter request failed: ${(e as Error).message}`);
   }
 
-  const data = await res.json().catch(() => null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 응답 형태는 아래에서 직접 확인한다.
+  let data: any;
+  try {
+    data = await res.json();
+  } catch (e) {
+    // 본문을 읽는 중 시간이 초과되면 빈 응답으로 처리하지 말고 시간 초과로 알린다 (재요청으로 예산을 낭비하지 않도록).
+    if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      throw new OpenRouterError(504, `OpenRouter response timed out: ${e.message}`);
+    }
+    data = null;
+  }
   // OpenRouter는 200 응답 안에 error를 담아 보내기도 한다.
   const error = data?.error;
   if (!res.ok || error) {

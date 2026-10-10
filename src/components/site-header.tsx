@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { loginUrl } from "@/lib/api-client";
+import { clearPrivateSession } from "@/lib/private-session";
 
 export function SiteHeader() {
   const { status } = useSession();
@@ -24,12 +25,27 @@ export function SiteHeader() {
               <Link href="/profile" className="hover:underline">
                 프로필
               </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  clearPrivateSession();
+                  void signOut({ redirectTo: "/" });
+                }}
+                className="text-zinc-500 hover:underline"
+              >
+                로그아웃
+              </button>
             </>
           ) : status === "unauthenticated" ? (
             <Link href={loginUrl(pathname)} className="rounded-lg border border-zinc-300 px-3 py-1 dark:border-zinc-700">
               로그인
             </Link>
-          ) : null}
+          ) : (
+            // 로그인 상태를 확인하는 동안 자리를 비워 두어 헤더가 흔들리지 않게 한다.
+            <span aria-hidden className="invisible px-3 py-1">
+              로그인
+            </span>
+          )}
         </div>
       </nav>
     </header>

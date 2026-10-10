@@ -5,7 +5,7 @@ import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { findUserByEmail, normalizeEmail } from "@/lib/db/repo";
-import { loginLimiter } from "@/lib/rate-limit";
+import { clientIp, loginLimiter } from "@/lib/rate-limit";
 
 class RateLimited extends CredentialsSignin {
   code = "rate_limited";
@@ -18,11 +18,6 @@ const credentialsSchema = z.object({
 
 // 존재하지 않는 이메일에도 bcrypt 비교를 한 번 해서, 응답 시간으로 계정 존재 여부가 드러나지 않게 한다.
 const DUMMY_HASH = bcrypt.hashSync("dummy-password-for-timing", 10);
-
-/** 프록시가 넘겨준 클라이언트 IP. 로컬 실행(next dev/start 직접 접속)에는 이 헤더가 없어 null이다. */
-function clientIp(request: Request): string | null {
-  return request.headers.get("x-forwarded-for")?.split(",")[0].trim() || request.headers.get("x-real-ip") || null;
-}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // 로컬(next start 포함)에서 호스트 검사를 통과시킨다. 배포한다면 AUTH_URL을 정하고 이 값을 다시 본다.
@@ -47,6 +42,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const ok = await bcrypt.compare(parsed.data.password, user?.passwordHash ?? DUMMY_HASH);
         // 실패 이유(이메일 없음/비밀번호 틀림)를 구분하지 않는다 (F3-3).
         if (!user || !ok) return null;
+        // 성공한 로그인은 한도에 남기지 않는다. 본인이 비밀번호를 한 번 맞췄다고 15분간 막히면 안 된다.
+        // IP 기록은 남겨 한 IP에서 여러 계정을 번갈아 시도하는 것은 계속 막는다.
+        loginLimiter.reset(`email:${email}`);
         return { id: user.id, email: user.email };
       },
     }),

@@ -93,6 +93,45 @@ describe("chatCompletion", () => {
     expect(slow).toHaveBeenCalledTimes(1);
   });
 
+  it.each([502, 503])("retries a transient %i from the provider within the budget", async (status) => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: status, message: "unavailable" } }), { status }))
+      .mockResolvedValueOnce(ok("recovered"));
+    const sleep = vi.fn(noSleep);
+    await expect(chatCompletion("m", [], undefined, { fetchImpl, sleep })).resolves.toBe("recovered");
+    expect(sleep.mock.calls.map((c) => c[0])).toEqual([5000]);
+  });
+
+  it("does not retry a 503 when the wait would pass the deadline", async () => {
+    let clock = 0;
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 503 }));
+    const sleep = vi.fn(async (ms: number) => {
+      clock += ms;
+    });
+    const err = await chatCompletion("m", [], undefined, { fetchImpl, sleep, now: () => clock, deadlineAt: 6_000 }).catch(
+      (e) => e,
+    );
+    expect(err.status).toBe(503);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a timeout while reading the response body as 504, not as an empty answer", async () => {
+    const timedOutBody = {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => {
+        throw new DOMException("timed out", "TimeoutError");
+      },
+    } as unknown as Response;
+    const fetchImpl = vi.fn(async () => timedOutBody);
+    const err = await chatCompletion("m", [], undefined, { fetchImpl, sleep: noSleep }).catch((e) => e);
+    expect(err).toBeInstanceOf(OpenRouterError);
+    expect(err.status).toBe(504);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("does not retry non-429 errors", async () => {
     const fetchImpl = vi.fn(
       async () => new Response(JSON.stringify({ error: { code: 401, message: "No auth" } }), { status: 401 }),

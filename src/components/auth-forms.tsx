@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
 import { api, ApiError, safeCallbackUrl } from "@/lib/api-client";
 
-const LOGIN_FAILED = "이메일 또는 비밀번호가 올바르지 않습니다";
+const LOGIN_FAILED = "이메일 또는 비밀번호가 올바르지 않아요. 다시 확인해 주세요.";
+const LOGIN_ERROR = "로그인하지 못했어요. 잠시 후 다시 시도해 주세요.";
 const RATE_LIMITED = "로그인 시도가 너무 많아요. 15분 뒤에 다시 시도해 주세요.";
 
 async function logIn(email: string, password: string): Promise<string | null> {
@@ -19,9 +20,19 @@ function useCallbackUrl() {
   return safeCallbackUrl(useSearchParams().get("callbackUrl"));
 }
 
+/** 이미 로그인한 사람이 로그인·가입 화면에 들어오면 원래 가려던 화면으로 보낸다. */
+function useRedirectIfLoggedIn(callbackUrl: string) {
+  const { status } = useSession();
+  const router = useRouter();
+  useEffect(() => {
+    if (status === "authenticated") router.replace(callbackUrl);
+  }, [status, router, callbackUrl]);
+}
+
 export function LoginForm() {
   const router = useRouter();
   const callbackUrl = useCallbackUrl();
+  useRedirectIfLoggedIn(callbackUrl);
   const joined = useSearchParams().get("joined") === "1";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -35,7 +46,7 @@ export function LoginForm() {
         e.preventDefault();
         setBusy(true);
         setError(null);
-        const failure = await logIn(email, password).catch(() => "로그인하지 못했어요. 잠시 후 다시 시도해 주세요.");
+        const failure = await logIn(email, password).catch(() => LOGIN_ERROR);
         setBusy(false);
         if (failure) setError(failure);
         else {
@@ -79,6 +90,7 @@ export function LoginForm() {
 export function SignupForm() {
   const router = useRouter();
   const callbackUrl = useCallbackUrl();
+  useRedirectIfLoggedIn(callbackUrl);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
@@ -95,7 +107,8 @@ export function SignupForm() {
         try {
           await api("/api/auth/register", { method: "POST", json: { email, password, nickname } });
           // 가입하면 바로 로그인시켜 원래 보던 화면으로 돌려보낸다.
-          const failure = await logIn(email, password);
+          // 네트워크 오류로 signIn이 던져도 계정은 이미 만들어졌으므로, 가입 실패로 보이지 않게 같은 분기로 보낸다.
+          const failure = await logIn(email, password).catch(() => LOGIN_ERROR);
           if (failure) {
             // 계정은 이미 만들어졌다. 다시 가입하면 "이미 가입된 이메일"이 되므로 로그인 화면으로 보낸다.
             router.replace(`/login?joined=1&callbackUrl=${encodeURIComponent(callbackUrl)}`);
@@ -104,7 +117,10 @@ export function SignupForm() {
           router.replace(callbackUrl);
           router.refresh();
         } catch (err) {
-          setError(err instanceof ApiError || err instanceof Error ? err.message : "가입하지 못했어요.");
+          // 서버가 준 문구(ApiError)만 보여 준다. fetch 실패 등의 영어 메시지("Failed to fetch")는 그대로 노출하지 않는다.
+          setError(
+            err instanceof ApiError ? err.message : "가입하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.",
+          );
           setBusy(false);
         }
       }}
@@ -112,12 +128,11 @@ export function SignupForm() {
       <Field label="이메일">
         <input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="input w-full" />
       </Field>
-      <Field label="비밀번호" hint="8자 이상">
+      <Field label="비밀번호" hint="8자 이상, 한글은 24자까지">
         <input
           type="password"
           required
           minLength={8}
-          maxLength={72}
           autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
