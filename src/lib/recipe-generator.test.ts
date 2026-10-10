@@ -59,7 +59,7 @@ describe("makeOwnershipChecker", () => {
 
 describe("finalizeRecipes", () => {
   it("recomputes owned instead of trusting the model", () => {
-    const [recipe] = finalizeRecipes([candidate()], request(), makeId);
+    const [recipe] = finalizeRecipes([candidate()], request(), { makeId });
     expect(recipe.ingredients.map((i) => i.owned)).toEqual([true, true, true, true]);
     expect(recipe.id).toMatch(/^id-/);
   });
@@ -81,14 +81,14 @@ describe("finalizeRecipes", () => {
         { name: "버터", amount: null },
       ],
     });
-    const result = finalizeRecipes([tooMany, twoMissing], request(), makeId);
+    const result = finalizeRecipes([tooMany, twoMissing], request(), { makeId });
     expect(result.map((r) => r.title)).toEqual(["새우 계란볶음"]);
     expect(result[0].ingredients.filter((i) => !i.owned)).toHaveLength(2);
   });
 
   it("drops recipes that use none of the user's ingredients", () => {
     const pantryOnly = candidate({ ingredients: [{ name: "간장", amount: null }, { name: "설탕", amount: null }] });
-    expect(finalizeRecipes([pantryOnly], request(), makeId)).toEqual([]);
+    expect(finalizeRecipes([pantryOnly], request(), { makeId })).toEqual([]);
   });
 
   it("enforces the time limit, including unknown times", () => {
@@ -100,7 +100,7 @@ describe("finalizeRecipes", () => {
         candidate({ title: "C", minutes: null }),
       ],
       req,
-      makeId,
+      { makeId },
     );
     expect(result.map((r) => r.title)).toEqual(["A"]);
   });
@@ -117,14 +117,30 @@ describe("finalizeRecipes", () => {
         candidate({ title: "오므라이스" }),
       ],
       req,
-      makeId,
+      { makeId },
     );
     expect(result.map((r) => r.title)).toEqual(["계란국", "파전", "계란말이"]);
   });
 
+  it("drops recipes containing a profile allergen, even if the model ignored the instruction", () => {
+    const profile = { nickname: "a", allergies: ["계란"], dislikedIngredients: [], dietType: "일반" as const, defaultServings: 2 };
+    const result = finalizeRecipes(
+      [
+        candidate({ title: "대파 볶음밥", ingredients: [{ name: "밥", amount: null }, { name: "달걀", amount: null }] }),
+        candidate({ title: "계란 없는 파전", ingredients: [{ name: "대파", amount: null }] }),
+        candidate({ title: "대파 마요 비빔밥", ingredients: [{ name: "밥", amount: null }, { name: "마요네즈", amount: null }] }),
+        candidate({ title: "대파 밥전", ingredients: [{ name: "밥", amount: null }, { name: "대파", amount: null }] }),
+      ],
+      request(),
+      { makeId, profile },
+    );
+    // 제목에 '계란'이 들어간 경우도 거른다 (재료 목록에 없더라도).
+    expect(result.map((r) => r.title)).toEqual(["대파 밥전"]);
+  });
+
   it("falls back to the requested servings when the model gives none", () => {
     const req = request({ options: { ...DEFAULT_OPTIONS, servings: 3 } });
-    expect(finalizeRecipes([candidate({ servings: null })], req, makeId)[0].servings).toBe(3);
+    expect(finalizeRecipes([candidate({ servings: null })], req, { makeId })[0].servings).toBe(3);
   });
 });
 
@@ -178,6 +194,48 @@ describe("generateRecipes", () => {
     expect(data).toContain("30분 이내");
     expect(data).toContain("양식");
     expect(data).toContain("계란말이");
+  });
+
+  it("puts the profile into <data> and removes allergen items from the pantry", async () => {
+    const fetchImpl = vi.fn(async () => reply({ recipes: [modelRecipe("계란찜")] }));
+    const profile = { nickname: "a", allergies: ["대두", "땅콩"], dislikedIngredients: ["오이"], dietType: "비건" as const, defaultServings: 2 };
+    await generateRecipes(request(), { fetchImpl }, profile);
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    const { messages } = JSON.parse(init.body as string);
+    expect(messages[0].content).toContain("어떤 레시피에도, 어떤 양으로도 쓰지 않는다");
+    const user: string = messages[1].content;
+    const data = JSON.parse(user.slice(user.indexOf("<data>") + 6, user.indexOf("</data>")));
+    expect(data.알레르기[0]).toMatch(/^대두 \(.*간장.*\)$/);
+    expect(data.싫어하는재료).toEqual(["오이"]);
+    expect(data.식단).toBe("비건");
+    expect(data.기본양념).not.toContain("간장");
+    expect(data.기본양념).toContain("소금");
+  });
+
+  it("hides the user's allergen ingredients from the model", async () => {
+    const fetchImpl = vi.fn(async () => reply({ recipes: [modelRecipe("대파 볶음밥", { ingredients: [{ name: "대파", amount: null }] })] }));
+    const profile = { nickname: "a", allergies: ["계란"], dislikedIngredients: [], dietType: "일반" as const, defaultServings: 2 };
+    const recipes = await generateRecipes(request(), { fetchImpl }, profile);
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    const user: string = JSON.parse(init.body as string).messages[1].content;
+    const data = JSON.parse(user.slice(user.indexOf("<data>") + 6, user.indexOf("</data>")));
+    expect(data.보유재료).toEqual(["대파 (1단)", "밥"]);
+    expect(recipes.map((r) => r.title)).toEqual(["대파 볶음밥"]);
+  });
+
+  it("skips the model when every ingredient is an allergen", async () => {
+    const fetchImpl = vi.fn();
+    const profile = { nickname: "a", allergies: ["계란", "우유"], dislikedIngredients: [], dietType: "일반" as const, defaultServings: 2 };
+    const req = request({ ingredients: [{ name: "달걀", quantity: null }, { name: "치즈", quantity: null }] });
+    await expect(generateRecipes(req, { fetchImpl }, profile)).resolves.toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("sends no profile fields when logged out", async () => {
+    const fetchImpl = vi.fn(async () => reply({ recipes: [modelRecipe("계란찜")] }));
+    await generateRecipes(request(), { fetchImpl }, null);
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string).messages[1].content).not.toContain("알레르기");
   });
 
   it("enforces the output shape with a strict JSON schema on capable providers only", async () => {

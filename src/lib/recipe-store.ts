@@ -11,6 +11,10 @@ export type RecipeSession = {
   recipes: Recipe[];
   /** "다른 레시피 보기"에서 제외할, 지금까지 나온 모든 레시피 제목 */
   seenTitles: string[];
+  /** 서버가 프로필(알레르기 등)을 반영했을 때의 안내 문구 */
+  profileNotice?: string | null;
+  /** 상세를 보고 있는 레시피 id. 로그인하러 갔다 와도 같은 레시피로 돌아오기 위해 저장한다. */
+  openId?: string | null;
 };
 
 const store = createSessionStore(

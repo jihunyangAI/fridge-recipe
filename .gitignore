@@ -35,3 +35,6 @@ next-env.d.ts
 
 # tool state
 .omc/
+
+# local database (PRD_step3)
+/data/

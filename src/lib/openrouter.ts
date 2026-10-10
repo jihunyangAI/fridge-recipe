@@ -15,6 +15,9 @@ export type ChatMessage = {
 /** 응답을 강제할 JSON Schema. 지원하는 제공자로만 라우팅된다 (provider.require_parameters). */
 export type JsonFormat = { name: string; schema: Record<string, unknown> };
 
+/** 응답을 받기 전에 연결이 끊긴 경우의 상태 값 (HTTP 상태가 아님) */
+export const NETWORK_ERROR = 0;
+
 export class OpenRouterError extends Error {
   constructor(
     readonly status: number,
@@ -70,7 +73,8 @@ export async function chatCompletion(
       const timeout = Math.min(attemptTimeoutMs, remaining());
       return await chatOnce(fetchImpl, apiKey, buildBody(model, messages, format), timeout);
     } catch (e) {
-      const retryable = e instanceof OpenRouterError && e.status === 429;
+      // 429(상위 제공자 혼잡)와 일시적인 연결 끊김은 다시 시도한다. 시간 초과는 다시 해도 남은 시간이 부족하다.
+      const retryable = e instanceof OpenRouterError && (e.status === 429 || e.status === NETWORK_ERROR);
       const delay = retryDelaysMs[attempt];
       if (!retryable || delay === undefined || remaining() - delay < MIN_ATTEMPT_MS) throw e;
       await sleep(delay);
@@ -112,7 +116,8 @@ async function chatOnce(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
-    throw new OpenRouterError(504, `OpenRouter request failed: ${(e as Error).message}`);
+    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+    throw new OpenRouterError(timedOut ? 504 : NETWORK_ERROR, `OpenRouter request failed: ${(e as Error).message}`);
   }
 
   const data = await res.json().catch(() => null);

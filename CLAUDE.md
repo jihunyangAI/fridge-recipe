@@ -13,14 +13,18 @@ npx vitest run -t "retries 429"               # tests matching a name
 npm run lint         # eslint
 npm run typecheck    # tsc --noEmit (run `npx next typegen` first if LayoutProps/PageProps are missing)
 node scripts/test-openrouter.mjs [image]      # live OpenRouter smoke test (needs Node 24+)
-node scripts/test-openrouter.mjs --key-only   # key usage/limits only, no model request
+node scripts/test-openrouter.mjs --key-only   # key usage/limits and account credits, no model request
+npm run setup:env    # add AUTH_SECRET / DATABASE_URL to .env if missing (never prints values)
+npm run db:generate  # after editing src/lib/db/schema.ts: write a new SQL migration into drizzle/
 ```
+
+The SQLite DB (`data/app.db`, gitignored) is created and migrated automatically on the first request (`getDb()` → `migrate()`). To reset local data, stop the server and delete `data/`.
 
 Next.js is 16.x (with `cacheComponents` enabled), which is newer than most training data. See `AGENTS.md`, and check `node_modules/next/dist/docs/` before using Next APIs.
 
 ## Product plan
 
-The app recognizes ingredients in a fridge photo and recommends recipes. It is built in three stages, each with its own spec: `PRD_step1.md` (image → ingredient recognition, **implemented**), `PRD_step2.md` (ingredients → recipe generation, **implemented**), and `PRD_step3.md` (accounts, profiles, saved recipes; planned SQLite + Drizzle + Auth.js). Read the relevant PRD before implementing a stage.
+The app recognizes ingredients in a fridge photo and recommends recipes. It is built in three stages, each with its own spec: `PRD_step1.md` (image → ingredient recognition, **implemented**), `PRD_step2.md` (ingredients → recipe generation, **implemented**), and `PRD_step3.md` (accounts, profiles, saved recipes, **implemented** with local SQLite + Drizzle + Auth.js; the app is meant to run on the user's own PC only). Read the relevant PRD before implementing a stage.
 
 ## Architecture
 
@@ -28,15 +32,22 @@ The app recognizes ingredients in a fridge photo and recommends recipes. It is b
   - `chatCompletion()` retries 429 with backoff (5→10→20s), but only within a shared deadline (`DEFAULT_BUDGET_MS` = 50s), so the server answers before the client's 60s timeout. It returns the raw text, which may be empty.
   - `requestJson(model, messages, spec, deps)` takes a `spec` (`JsonSpec`: `name`, `schema`, `parse`). It sends `response_format: json_schema` (strict) with `provider.require_parameters: true`, so only providers that enforce the schema are used. Without this, Gemma sometimes produced broken JSON like `{"name":"브로콜리","송이"}`. It then extracts the JSON, validates it with `parse`, and re-requests once on failure. If both fail it throws `ModelOutputError`. Unusable output and non-`stop` finish reasons are logged with `console.warn`. When the output shape changes, update both the JSON Schema and the zod schema.
   - `withDeadline()` lets several calls share one budget.
-- `src/lib/api-errors.ts`: `modelErrorResponse()` maps errors to statuses for every route. Exhausted 429 → 503, timeout → 504, `ModelOutputError` → 502, key or credit problems → generic 500 (details only in the server log).
+- `src/lib/api-errors.ts`: `modelErrorResponse()` maps errors to statuses for every route. Exhausted 429 → 503, a dropped connection (`NETWORK_ERROR` = 0, retried like 429) → 503 with a connection message, timeout → 504, `ModelOutputError` → 502, key or credit problems → generic 500 (details only in the server log).
 - Step 1: `recognize.ts` holds the vision prompt and `detectImageType()`, which checks magic bytes (the client MIME type is never trusted). `ingredients.ts` holds the types and a deliberately lenient zod schema: it drops nameless items, defaults unknown enum values, and treats `"null"` strings as null. The free Gemma model often breaks the format.
 - Step 2: `recipe-generator.ts` builds the prompt, with all user text inside `<data>` and an instruction to ignore directives there.
   - Server rules apply on top of the model: `owned` is always recomputed (name containment for names of 2+ characters, 달걀→계란, pantry when `assumePantry`, water always counts). A recipe is dropped if it has more than 2 missing ingredients, uses none of the user's ingredients, breaks `maxMinutes` (unknown time also counts as breaking it), or repeats an `excludeTitles` entry (spaces ignored).
-  - If nothing survives the rules, it regenerates once. If that also fails, the result is `[]`, which is not an error. The client shows "조건에 맞는 레시피를 찾지 못했어요".
+  - If nothing survives the rules, it regenerates once and logs each dropped title with its reason (`[recipes] round N: ...`). If that also fails, the result is `[]`, which is not an error. The client shows "조건에 맞는 레시피를 찾지 못했어요".
   - `recipes.ts` holds the shared types and the request schema.
+- Step 3 (accounts):
+  - Auth: `src/auth.ts` sets up Auth.js v5 beta (Credentials + JWT, `trustHost: true`). The `authorize` step does bcrypt compare with a dummy hash for unknown emails, so timing doesn't reveal whether an account exists. Every failure returns the same "credentials" code, except `rate_limited` (10 tries per 15 min by email, plus by IP only when `x-forwarded-for` exists; locally there is no client IP, so every request would share one bucket).
+  - API routes: they call `requireUser()` / `optionalUser()` from `src/lib/api-auth.ts`, which also rejects sessions whose user row is gone. State-changing routes call `rejectCrossOrigin()` first (Origin must match Host). Other users' rows always return 404.
+  - Data access: everything goes through `src/lib/db/repo.ts`, and every function is scoped by `userId`. `saveRecipe` enforces `MAX_SAVED` (200) and turns UNIQUE violations into `DuplicateError` (→ 409). Search uses LIKE with `ESCAPE '\'`. `PRAGMA foreign_keys = ON` is required for the ON DELETE CASCADE on account deletion.
+  - Allergens: `src/lib/profile.ts` holds `ALLERGEN_GROUPS`, which deliberately over-matches (substring, including 1-char terms like 게/밀). `recipe-generator.ts` removes allergen items from both the user's ingredients and the pantry before prompting, and drops any recipe whose title or ingredient names match. If every ingredient is an allergen, the model isn't called.
+  - Client pages don't read cookies on the server. That would need `<Suspense>` under `cacheComponents`. Instead they use `useSession` (`SessionProvider` in `providers.tsx`) and `useRequireAuth()` / `useProfile()` from `src/lib/use-auth.ts`. Components that read the URL (`usePathname`, `useParams`, `useSearchParams`) must sit inside `<Suspense>`, or `next build` fails on dynamic routes.
+  - Save after login: `SaveButton` stores `fridge:pendingSave`, and the planner keeps `openId` in `fridge:recipes`. After login, `/recipes` reopens the same recipe and finishes the save.
 - Client state lives in sessionStorage through `session-store.ts` (`createSessionStore`, `useSyncExternalStore`). Use it rather than `setState` inside effects, which the React lint rule rejects. `useHydrated()` gates logic that depends on the browser, such as redirecting from `/recipes` to `/` when there are no ingredients. `fridge:ingredients` holds the step 1 list. `fridge:recipes` (`recipe-store.ts`) holds the results, the options, and `seenTitles` for "다른 레시피 보기". It is discarded when the ingredient list changes (`ingredientsKey`).
 - With `cacheComponents`, Next keeps the previously visited route's `<main>` hidden in the DOM. Browser tests must target visible elements.
-- Tests use dependency injection (`ChatDeps`: `fetchImpl`, `sleep`, `now`, `deadlineAt`), so they never hit the network. `vitest.config.mts` aliases `server-only` to an empty module.
+- Tests use dependency injection (`ChatDeps`: `fetchImpl`, `sleep`, `now`, `deadlineAt`), so they never hit the network. `vitest.config.mts` aliases `server-only` to an empty module. Route tests for step 3 mock only `@/auth` and `getDb` (see `src/test/auth-db.ts`) and run the real routes against an in-memory SQLite (`openDb(":memory:")`).
 
 ## OpenRouter
 
@@ -46,6 +57,6 @@ The app recognizes ingredients in a fridge photo and recommends recipes. It is b
 
 ## Secrets
 
-- `.env` holds `OPENROUTER_API_KEY`. Don't read it or print its value. It is gitignored, and `.claude/settings.json` denies Claude from reading it. Next.js loads it automatically.
+- `.env` holds `OPENROUTER_API_KEY`, `AUTH_SECRET` and `DATABASE_URL`. Don't read it or print its values; a hook also blocks any shell command that mentions `.env`. It is gitignored, and `.claude/settings.json` denies Claude from reading it. Next.js loads it automatically.
 - `.env.example` lists the variable names. When you add a new variable, add its name there too.
 - Access the key only in `server-only` modules. Never use `NEXT_PUBLIC_*` for it. After building, `grep -rE "openrouter\.ai|OPENROUTER_API_KEY" .next/static` must find nothing.

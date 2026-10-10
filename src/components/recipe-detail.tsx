@@ -39,7 +39,18 @@ export function RecipeCard({ recipe, onOpen }: { recipe: Recipe; onOpen: () => v
   );
 }
 
-export function RecipeDetail({ recipe, onBack }: { recipe: Recipe; onBack: () => void }) {
+export function RecipeDetail({
+  recipe,
+  onBack,
+  backLabel = "← 레시피 목록",
+  actions,
+}: {
+  recipe: Recipe;
+  onBack: () => void;
+  backLabel?: string;
+  /** 제목 아래에 붙는 버튼 영역 (저장, 메모, 삭제 등) */
+  actions?: React.ReactNode;
+}) {
   // 조리 단계 완료 체크는 화면 상태로만 둔다 (저장하지 않음).
   const [done, setDone] = useState<Set<number>>(new Set());
   const toggle = (i: number) =>
@@ -53,13 +64,14 @@ export function RecipeDetail({ recipe, onBack }: { recipe: Recipe; onBack: () =>
   return (
     <article className="flex flex-col gap-6">
       <button type="button" onClick={onBack} className="self-start text-sm text-zinc-500 underline">
-        ← 레시피 목록
+        {backLabel}
       </button>
       <header className="flex flex-col gap-1">
         <h2 className="text-2xl font-bold">{recipe.title}</h2>
         {recipe.summary && <p className="text-zinc-600 dark:text-zinc-400">{recipe.summary}</p>}
         <RecipeMeta recipe={recipe} />
       </header>
+      {actions}
 
       <section className="flex flex-col gap-2">
         <h3 className="font-semibold">재료</h3>

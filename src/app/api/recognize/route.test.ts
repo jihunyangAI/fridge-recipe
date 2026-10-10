@@ -59,6 +59,13 @@ describe("POST /api/recognize", () => {
     expect((await res.json()).error).toBe("지금 요청이 많아요. 잠시 후 다시 시도해 주세요.");
   });
 
+  it("maps a lost connection to 503 with a connection message", async () => {
+    recognizeIngredients.mockRejectedValue(new OpenRouterError(0, "fetch failed"));
+    const res = await post(new Blob([JPEG]));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toContain("인터넷 연결");
+  });
+
   it("maps an upstream timeout to 504", async () => {
     recognizeIngredients.mockRejectedValue(new OpenRouterError(504, "timeout"));
     const res = await post(new Blob([JPEG]));

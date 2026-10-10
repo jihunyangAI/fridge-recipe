@@ -83,6 +83,16 @@ describe("chatCompletion", () => {
     await expect(chatCompletion("m", [], undefined, { fetchImpl })).resolves.toBe("");
   });
 
+  it("retries a dropped connection but not a timeout", async () => {
+    const flaky = vi.fn().mockRejectedValueOnce(new TypeError("fetch failed")).mockResolvedValueOnce(ok("back"));
+    await expect(chatCompletion("m", [], undefined, { fetchImpl: flaky, sleep: noSleep })).resolves.toBe("back");
+
+    const slow = vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    const err = await chatCompletion("m", [], undefined, { fetchImpl: slow, sleep: noSleep }).catch((e) => e);
+    expect(err.status).toBe(504);
+    expect(slow).toHaveBeenCalledTimes(1);
+  });
+
   it("does not retry non-429 errors", async () => {
     const fetchImpl = vi.fn(
       async () => new Response(JSON.stringify({ error: { code: 401, message: "No auth" } }), { status: 401 }),

@@ -1,5 +1,5 @@
 import "server-only";
-import { ModelOutputError, OpenRouterError } from "./openrouter";
+import { ModelOutputError, NETWORK_ERROR, OpenRouterError } from "./openrouter";
 
 export const errorJson = (status: number, error: string) => Response.json({ error }, { status });
 
@@ -14,6 +14,10 @@ export function modelErrorResponse(e: unknown, tag: string, badOutputMessage: st
   }
   if (e instanceof OpenRouterError && e.status === 429) {
     return errorJson(503, "지금 요청이 많아요. 잠시 후 다시 시도해 주세요.");
+  }
+  if (e instanceof OpenRouterError && e.status === NETWORK_ERROR) {
+    console.error(`[${tag}] network error:`, e.message);
+    return errorJson(503, "AI 서버에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.");
   }
   if (e instanceof OpenRouterError && e.status === 504) {
     console.error(`[${tag}] upstream timeout:`, e.message);

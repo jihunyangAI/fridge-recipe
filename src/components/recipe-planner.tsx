@@ -15,7 +15,9 @@ import {
   type RecipesResponse,
 } from "@/lib/recipes";
 import { useHydrated } from "@/lib/session-store";
+import { useProfile } from "@/lib/use-auth";
 import { RecipeCard, RecipeDetail } from "./recipe-detail";
+import { SaveButton } from "./save-button";
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const SLOW_HINT_MS = 15_000;
@@ -26,13 +28,15 @@ export function RecipePlanner() {
   const hydrated = useHydrated();
   const ingredients = useStoredIngredients();
   const session = useRecipeSession();
+  const profile = useProfile();
 
   const key = ingredients ? ingredientsKey(ingredients) : null;
   // 1단계에서 재료를 바꿨다면 예전 결과는 보여주지 않는다.
   const current = session && session.ingredientsKey === key ? session : null;
 
   const [draft, setDraft] = useState<RecipeOptions | null>(null);
-  const options = draft ?? current?.options ?? DEFAULT_OPTIONS;
+  // 처음 조건의 인분은 프로필의 기본 인분을 따른다.
+  const options = draft ?? current?.options ?? { ...DEFAULT_OPTIONS, servings: profile?.defaultServings ?? DEFAULT_OPTIONS.servings };
   const setOption = <K extends keyof RecipeOptions>(name: K, value: RecipeOptions[K]) =>
     setDraft({ ...options, [name]: value });
 
@@ -40,7 +44,6 @@ export function RecipePlanner() {
   const [slow, setSlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const hasIngredients = !!ingredients && ingredients.length > 0;
   useEffect(() => {
@@ -49,6 +52,10 @@ export function RecipePlanner() {
 
   if (!hydrated || !ingredients || !key || !hasIngredients) return null;
 
+  const setSelectedId = (openId: string | null) => {
+    if (current) saveRecipeSession({ ...current, openId });
+  };
+
   async function generate(more: boolean) {
     if (!ingredients || !key) return;
     const seenBefore = more ? (current?.seenTitles ?? []) : [];
@@ -56,7 +63,6 @@ export function RecipePlanner() {
     setSlow(false);
     setError(null);
     setNotice(null);
-    setSelectedId(null);
     const slowTimer = setTimeout(() => setSlow(true), SLOW_HINT_MS);
 
     try {
@@ -73,7 +79,7 @@ export function RecipePlanner() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? "레시피를 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
 
-      const { recipes } = body as RecipesResponse;
+      const { recipes, profileNotice } = body as RecipesResponse;
       if (more && recipes.length === 0) {
         // 다른 레시피를 못 찾았으면 지금 보던 결과는 그대로 둔다.
         setNotice("더 이상 다른 레시피를 찾지 못했어요. 조건을 바꿔 보세요.");
@@ -84,6 +90,8 @@ export function RecipePlanner() {
         options,
         recipes,
         seenTitles: [...seenBefore, ...recipes.map((r) => r.title)],
+        profileNotice,
+        openId: null,
       });
       setDraft(null);
     } catch (e) {
@@ -101,9 +109,20 @@ export function RecipePlanner() {
     }
   }
 
-  const selected = current?.recipes.find((r) => r.id === selectedId);
+  const selected = current?.recipes.find((r) => r.id === current.openId);
   if (selected) {
-    return <RecipeDetail recipe={selected} onBack={() => setSelectedId(null)} />;
+    return (
+      <RecipeDetail
+        recipe={selected}
+        onBack={() => setSelectedId(null)}
+        actions={
+          <SaveButton
+            recipe={selected}
+            sourceIngredients={ingredients.map((i) => ({ name: i.name.trim().slice(0, 30), quantity: i.quantity }))}
+          />
+        }
+      />
+    );
   }
 
   return (
@@ -184,12 +203,20 @@ export function RecipePlanner() {
         current && (
           <section className="flex flex-col gap-3">
             {current.recipes.length === 0 ? (
-              <p className="text-zinc-600 dark:text-zinc-400">
-                조건에 맞는 레시피를 찾지 못했어요. 조건을 줄여 보세요.
-              </p>
+              <>
+                <p className="text-zinc-600 dark:text-zinc-400">
+                  조건에 맞는 레시피를 찾지 못했어요. 조건을 줄여 보세요.
+                </p>
+                {current.profileNotice && <p className="text-sm text-zinc-500">{current.profileNotice}</p>}
+              </>
             ) : (
               <>
                 <h2 className="text-xl font-semibold">추천 레시피</h2>
+                {current.profileNotice && (
+                  <p role="note" className="rounded-lg bg-sky-50 p-3 text-sm text-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+                    {current.profileNotice}
+                  </p>
+                )}
                 {current.recipes.map((recipe) => (
                   <RecipeCard
                     key={recipe.id}

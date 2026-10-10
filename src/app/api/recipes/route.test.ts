@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OpenRouterError } from "@/lib/openrouter";
+import { ALLERGY_NOTICE, DIET_NOTICE } from "@/lib/recipes";
+import { testAuth, testDb } from "@/test/auth-db";
 
 const generateRecipes = vi.fn();
 vi.mock("@/lib/recipe-generator", () => ({
   generateRecipes: (...args: unknown[]) => generateRecipes(...args),
 }));
+vi.mock("@/auth", () => ({ auth: () => testAuth.session() }));
+vi.mock("@/lib/db", async (orig) => ({ ...(await orig<typeof import("@/lib/db")>()), getDb: () => testDb.get() }));
 
 const { POST } = await import("./route");
+const { createUser, updateProfile } = await import("@/lib/db/repo");
 
 const post = (body: unknown) =>
   POST(
@@ -20,18 +25,37 @@ const post = (body: unknown) =>
 describe("POST /api/recipes", () => {
   beforeEach(() => {
     generateRecipes.mockReset();
+    testAuth.signInAs(null);
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it("fills default options and returns recipes", async () => {
+  it("fills default options and returns recipes without a profile when logged out", async () => {
     generateRecipes.mockResolvedValue([{ id: "1", title: "계란찜" }]);
     const res = await post({ ingredients: [{ name: "계란" }] });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ recipes: [{ id: "1", title: "계란찜" }] });
+    expect(await res.json()).toEqual({ recipes: [{ id: "1", title: "계란찜" }], profileNotice: null });
     expect(generateRecipes.mock.calls[0][0]).toMatchObject({
       options: { maxMinutes: null, servings: 2, assumePantry: true },
       excludeTitles: [],
     });
+    expect(generateRecipes.mock.calls[0][2]).toBeNull();
+  });
+
+  it("passes the logged-in user's profile and shows the matching notice", async () => {
+    const db = await testDb.reset();
+    const { id } = await createUser(db, { email: "a@x.com", passwordHash: "h", nickname: "앨리스" });
+    testAuth.signInAs(id);
+    generateRecipes.mockResolvedValue([]);
+
+    expect((await (await post({ ingredients: [{ name: "계란" }] })).json()).profileNotice).toBeNull();
+
+    await updateProfile(db, id, { nickname: "앨리스", allergies: [], dislikedIngredients: [], dietType: "비건", defaultServings: 2 });
+    expect((await (await post({ ingredients: [{ name: "두부" }] })).json()).profileNotice).toBe(DIET_NOTICE);
+
+    await updateProfile(db, id, { nickname: "앨리스", allergies: ["계란"], dislikedIngredients: [], dietType: "일반", defaultServings: 2 });
+    const res = await (await post({ ingredients: [{ name: "두부" }] })).json();
+    expect(res.profileNotice).toBe(ALLERGY_NOTICE);
+    expect(generateRecipes.mock.calls.at(-1)?.[2]).toMatchObject({ allergies: ["계란"] });
   });
 
   it.each([
@@ -50,7 +74,7 @@ describe("POST /api/recipes", () => {
     generateRecipes.mockResolvedValue([]);
     const res = await post({ ingredients: [{ name: "자동차" }] });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ recipes: [] });
+    expect(await res.json()).toEqual({ recipes: [], profileNotice: null });
   });
 
   it("maps exhausted rate limiting to 503", async () => {

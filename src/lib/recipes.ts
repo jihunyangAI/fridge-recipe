@@ -48,7 +48,37 @@ export type Recipe = {
   tips: string | null;
 };
 
-export type RecipesResponse = { recipes: Recipe[] };
+export const ALLERGY_NOTICE = "프로필의 알레르기 정보를 반영했어요. 정확한 알레르기 성분은 직접 확인해 주세요.";
+export const DIET_NOTICE = "프로필의 식단 정보를 반영했어요.";
+
+export type RecipesResponse = {
+  recipes: Recipe[];
+  /** 로그인 사용자의 프로필(알레르기 등)을 반영했을 때 화면에 보여줄 안내 */
+  profileNotice: string | null;
+};
+
+/** 저장 요청으로 들어온 레시피를 다시 검증할 때 쓴다 (클라이언트가 보낸 값은 믿지 않는다). */
+export const recipeSchema = z.object({
+  id: z.string().min(1).max(64),
+  title: z.string().trim().min(1).max(60),
+  summary: z.string().max(300),
+  cuisine: z.string().max(20).nullable(),
+  minutes: z.number().int().positive().max(1440).nullable(),
+  difficulty: z.string().max(20).nullable(),
+  servings: z.number().int().min(1).max(20),
+  ingredients: z
+    .array(z.object({ name: z.string().min(1).max(60), amount: z.string().max(60).nullable(), owned: z.boolean() }))
+    .min(1)
+    .max(40),
+  steps: z.array(z.string().min(1).max(500)).min(1).max(15),
+  tips: z.string().max(500).nullable(),
+});
+
+export const sourceIngredientsSchema = z
+  .array(z.object({ name: z.string().trim().min(1).max(30), quantity: z.string().max(30).nullable() }))
+  .max(50);
+
+export type SourceIngredient = z.infer<typeof sourceIngredientsSchema>[number];
 
 export const recipeRequestSchema = z.object({
   ingredients: z
