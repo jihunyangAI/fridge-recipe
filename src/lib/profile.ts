@@ -8,22 +8,22 @@ export type DietType = (typeof DIET_TYPES)[number];
  * 가정 요리에 흔한 가공식품을 더했다. 안전을 위해 넓게 잡는다 (조금 과하게 걸러내는 쪽을 택함).
  */
 export const ALLERGEN_GROUPS: Record<string, readonly string[]> = {
-  계란: ["계란", "달걀", "메추리알", "마요네즈"],
-  우유: ["우유", "치즈", "버터", "요거트", "요구르트", "생크림", "크림", "연유", "분유"],
+  계란: ["계란", "달걀", "메추리알", "마요네즈", "노른자", "흰자", "에그"],
+  우유: ["우유", "치즈", "버터", "요거트", "요구르트", "생크림", "크림", "연유", "분유", "모짜렐라", "파마산", "리코타", "밀크"],
   땅콩: ["땅콩", "피넛"],
   견과류: ["견과", "호두", "아몬드", "잣", "캐슈", "피스타치오", "헤이즐넛", "마카다미아"],
-  밀: ["밀", "빵", "면", "파스타", "국수", "라면", "우동", "부침가루", "튀김가루", "만두피", "또띠아"],
+  밀: ["밀", "빵", "면", "파스타", "스파게티", "마카로니", "펜네", "국수", "라면", "우동", "부침가루", "튀김가루", "만두", "또띠아", "토르티야", "카레", "돈가스"],
   대두: ["대두", "콩", "두부", "된장", "간장", "두유", "고추장", "춘장"],
   메밀: ["메밀"],
   갑각류: ["새우", "게", "랍스터", "가재", "크랩"],
   조개류: ["조개", "바지락", "홍합", "굴", "전복", "가리비", "꼬막"],
-  생선: ["생선", "고등어", "연어", "참치", "멸치", "갈치", "대구", "명태", "동태", "황태", "꽁치", "삼치", "어묵", "액젓"],
+  생선: ["생선", "고등어", "연어", "참치", "멸치", "갈치", "대구", "명태", "동태", "황태", "꽁치", "삼치", "어묵", "액젓", "피시소스", "가쓰오", "가다랑어", "안초비", "앤초비"],
   오징어: ["오징어", "한치"],
   복숭아: ["복숭아"],
   토마토: ["토마토", "케첩"],
-  돼지고기: ["돼지고기", "삼겹살", "목살", "베이컨", "햄", "소시지"],
+  돼지고기: ["돼지고기", "삼겹살", "목살", "앞다리", "뒷다리", "베이컨", "햄", "소시지"],
   닭고기: ["닭", "치킨"],
-  쇠고기: ["쇠고기", "소고기", "차돌", "등심", "안심"],
+  쇠고기: ["쇠고기", "소고기", "차돌", "우삼겹", "양지", "등심", "안심", "사태"],
 };
 
 export const ALLERGEN_OPTIONS = Object.keys(ALLERGEN_GROUPS);
@@ -50,22 +50,25 @@ export const profileInputSchema = z.object({
   defaultServings: z.number().int().min(1).max(4),
 });
 
-const compact = (s: string) => s.replace(/\(.*?\)/g, "").replace(/\s+/g, "").toLowerCase();
+// 괄호는 지우되 괄호 안의 내용은 남긴다. 모델은 "소스 (땅콩버터)"처럼 괄호 안에 실제 재료를 적곤 한다.
+const compact = (s: string) => s.replace(/[\s()]/g, "").toLowerCase();
 
 /** 사용자의 알레르기 목록을 실제로 검사할 재료 이름들로 펼친다. 목록에 없는 항목은 그 이름 그대로 쓴다. */
 export function expandAllergens(allergies: string[]): string[] {
-  const terms = allergies.flatMap((a) => [a, ...(ALLERGEN_GROUPS[a] ?? [])]);
+  const terms = allergies.flatMap((a) => [a, ...(ALLERGEN_GROUPS[compact(a)] ?? ALLERGEN_GROUPS[a] ?? [])]);
   return [...new Set(terms.map(compact).filter(Boolean))];
 }
 
 /**
- * texts(재료 이름, 요리 제목 등) 중 하나라도 알레르기 재료를 포함하면 그 재료 이름을 돌려준다.
- * 한 글자 이름("게", "밀")도 포함 여부로 검사한다. 놓치는 것보다 과하게 거르는 편이 안전하다.
+ * texts 중 하나라도 알레르기 재료를 포함하면 그 재료 이름을 돌려준다. 놓치는 것보다 과하게 거르는 편이 안전하다.
+ * minTermLength: 요리 제목처럼 일반 문장이 섞인 텍스트에서는 "게"(부드럽게), "면"(양면) 같은
+ * 한 글자 재료가 엉뚱하게 걸리므로 2를 넘긴다. 재료 이름에는 기본값 1을 쓴다.
  */
-export function findAllergen(texts: string[], allergenTerms: string[]): string | null {
+export function findAllergen(texts: string[], allergenTerms: string[], minTermLength = 1): string | null {
+  const terms = allergenTerms.filter((t) => t.length >= minTermLength);
   for (const text of texts) {
     const t = compact(text);
-    const hit = allergenTerms.find((term) => t.includes(term));
+    const hit = terms.find((term) => t.includes(term));
     if (hit) return hit;
   }
   return null;

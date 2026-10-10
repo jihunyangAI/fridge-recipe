@@ -4,8 +4,23 @@ import "server-only";
  * 메모리 기반 고정 창 카운터. 로컬 단일 프로세스 앱이라 외부 저장소 없이 충분하다
  * (서버를 재시작하면 기록이 사라진다).
  */
-export function createRateLimiter({ limit, windowMs, now = Date.now }: { limit: number; windowMs: number; now?: () => number }) {
+export function createRateLimiter({
+  limit,
+  windowMs,
+  now = Date.now,
+  sweepAt = 1000,
+}: {
+  limit: number;
+  windowMs: number;
+  now?: () => number;
+  /** 기록된 키가 이 개수를 넘으면 만료된 키를 한꺼번에 지운다 (처음 보는 이메일마다 키가 늘어나므로). */
+  sweepAt?: number;
+}) {
   const hits = new Map<string, number[]>();
+  const sweep = () => {
+    const cutoff = now() - windowMs;
+    for (const [key, list] of hits) if (!list.some((t) => t > cutoff)) hits.delete(key);
+  };
 
   const recent = (key: string) => {
     const cutoff = now() - windowMs;
@@ -20,7 +35,10 @@ export function createRateLimiter({ limit, windowMs, now = Date.now }: { limit: 
     isLimited: (...keys: string[]) => keys.some((k) => recent(k).length >= limit),
     hit: (...keys: string[]) => {
       for (const k of keys) hits.set(k, [...recent(k), now()]);
+      if (hits.size > sweepAt) sweep();
     },
+    /** 테스트용: 지금 기록 중인 키 개수 */
+    size: () => hits.size,
   };
 }
 

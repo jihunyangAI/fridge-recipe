@@ -13,6 +13,8 @@ export type RecipeSession = {
   seenTitles: string[];
   /** 서버가 프로필(알레르기 등)을 반영했을 때의 안내 문구 */
   profileNotice?: string | null;
+  /** 이 결과에 적용된 알레르기(allergyKey). 로그인·프로필 변경 뒤 결과가 낡았는지 판단한다. */
+  allergyKey?: string;
   /** 상세를 보고 있는 레시피 id. 로그인하러 갔다 와도 같은 레시피로 돌아오기 위해 저장한다. */
   openId?: string | null;
 };

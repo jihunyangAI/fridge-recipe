@@ -21,6 +21,33 @@ describe("allergens", () => {
     expect(findAllergen(["진간장"], expandAllergens(["대두"]))).toBe("간장");
   });
 
+  it("checks text inside parentheses (the model writes notes there)", () => {
+    expect(findAllergen(["드레싱(마요네즈)"], expandAllergens(["계란"]))).toBe("마요네즈");
+    expect(findAllergen(["양념장(간장, 설탕)"], expandAllergens(["대두"]))).toBe("간장");
+    expect(findAllergen(["소스 (땅콩버터)"], expandAllergens(["땅콩"]))).toBe("땅콩");
+    expect(findAllergen(["육수(새우)"], expandAllergens(["갑각류"]))).toBe("새우");
+  });
+
+  it("keeps custom allergies written with parentheses", () => {
+    expect(expandAllergens(["(고수)"])).toEqual(["고수"]);
+    expect(expandAllergens(["(땅콩)"])).toEqual(expect.arrayContaining(["땅콩", "피넛"]));
+  });
+
+  it("can ignore one-letter terms for prose such as recipe titles", () => {
+    const terms = expandAllergens(["갑각류"]);
+    expect(findAllergen(["부드럽게 볶은 두부"], terms)).toBe("게");
+    expect(findAllergen(["부드럽게 볶은 두부"], terms, 2)).toBeNull();
+    expect(findAllergen(["새우 볶음밥"], terms, 2)).toBe("새우");
+  });
+
+  it("covers common items the first version missed", () => {
+    expect(findAllergen(["피시소스"], expandAllergens(["생선"]))).not.toBeNull();
+    expect(findAllergen(["스파게티 면"], expandAllergens(["밀"]))).not.toBeNull();
+    expect(findAllergen(["모짜렐라"], expandAllergens(["우유"]))).not.toBeNull();
+    expect(findAllergen(["노른자"], expandAllergens(["계란"]))).not.toBeNull();
+    expect(findAllergen(["우삼겹"], expandAllergens(["쇠고기"]))).not.toBeNull();
+  });
+
   it("returns nothing when there are no allergies", () => {
     expect(findAllergen(["계란"], expandAllergens([]))).toBeNull();
   });

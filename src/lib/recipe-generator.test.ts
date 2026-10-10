@@ -138,6 +138,19 @@ describe("finalizeRecipes", () => {
     expect(result.map((r) => r.title)).toEqual(["대파 밥전"]);
   });
 
+  it("catches allergens hidden in parentheses but not one-letter words in titles", () => {
+    const profile = { nickname: "a", allergies: ["갑각류"], dislikedIngredients: [], dietType: "일반" as const, defaultServings: 2 };
+    const result = finalizeRecipes(
+      [
+        candidate({ title: "대파 국", ingredients: [{ name: "대파", amount: null }, { name: "육수(새우)", amount: null }] }),
+        candidate({ title: "부드럽게 볶은 대파밥", ingredients: [{ name: "밥", amount: null }, { name: "대파", amount: null }] }),
+      ],
+      request(),
+      { makeId, profile },
+    );
+    expect(result.map((r) => r.title)).toEqual(["부드럽게 볶은 대파밥"]);
+  });
+
   it("falls back to the requested servings when the model gives none", () => {
     const req = request({ options: { ...DEFAULT_OPTIONS, servings: 3 } });
     expect(finalizeRecipes([candidate({ servings: null })], req, { makeId })[0].servings).toBe(3);

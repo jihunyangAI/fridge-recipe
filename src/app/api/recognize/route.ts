@@ -1,3 +1,4 @@
+import { rejectCrossOrigin } from "@/lib/api-auth";
 import { errorJson, modelErrorResponse } from "@/lib/api-errors";
 import { detectImageType, MAX_IMAGE_BYTES, recognizeIngredients } from "@/lib/recognize";
 
@@ -5,6 +6,10 @@ import { detectImageType, MAX_IMAGE_BYTES, recognizeIngredients } from "@/lib/re
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  // 다른 사이트가 사용자의 브라우저로 이 API를 불러 OpenRouter 크레딧을 쓰지 못하게 한다.
+  const blocked = rejectCrossOrigin(request);
+  if (blocked) return blocked;
+
   let form: FormData;
   try {
     form = await request.formData();

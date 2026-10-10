@@ -11,6 +11,8 @@ import {
   DIFFICULTIES,
   SERVINGS,
   TIME_LIMITS,
+  allergyKey,
+  toSourceIngredients,
   type RecipeOptions,
   type RecipesResponse,
 } from "@/lib/recipes";
@@ -70,7 +72,7 @@ export function RecipePlanner() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ingredients: ingredients.map((i) => ({ name: i.name.trim().slice(0, 30), quantity: i.quantity })),
+          ingredients: toSourceIngredients(ingredients),
           options,
           excludeTitles: seenBefore.slice(-MAX_EXCLUDED),
         }),
@@ -79,7 +81,7 @@ export function RecipePlanner() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? "레시피를 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
 
-      const { recipes, profileNotice } = body as RecipesResponse;
+      const { recipes, profileNotice, appliedAllergies } = body as RecipesResponse;
       if (more && recipes.length === 0) {
         // 다른 레시피를 못 찾았으면 지금 보던 결과는 그대로 둔다.
         setNotice("더 이상 다른 레시피를 찾지 못했어요. 조건을 바꿔 보세요.");
@@ -91,6 +93,7 @@ export function RecipePlanner() {
         recipes,
         seenTitles: [...seenBefore, ...recipes.map((r) => r.title)],
         profileNotice,
+        allergyKey: allergyKey(appliedAllergies ?? []),
         openId: null,
       });
       setDraft(null);
@@ -109,6 +112,18 @@ export function RecipePlanner() {
     }
   }
 
+  // 로그인 전이나 알레르기를 바꾸기 전에 만든 결과는 지금 프로필의 알레르기가 걸러지지 않았다.
+  const staleForAllergies =
+    !!current &&
+    !!profile &&
+    profile.allergies.length > 0 &&
+    allergyKey(profile.allergies) !== (current.allergyKey ?? "");
+  const staleWarning = staleForAllergies && (
+    <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+      프로필의 알레르기가 반영되기 전에 만든 레시피예요. 재료를 꼭 확인하거나, 조건을 그대로 두고 다시 만들어 주세요.
+    </p>
+  );
+
   const selected = current?.recipes.find((r) => r.id === current.openId);
   if (selected) {
     return (
@@ -116,10 +131,10 @@ export function RecipePlanner() {
         recipe={selected}
         onBack={() => setSelectedId(null)}
         actions={
-          <SaveButton
-            recipe={selected}
-            sourceIngredients={ingredients.map((i) => ({ name: i.name.trim().slice(0, 30), quantity: i.quantity }))}
-          />
+          <div className="flex flex-col gap-3">
+            {staleWarning}
+            <SaveButton recipe={selected} sourceIngredients={toSourceIngredients(ingredients)} />
+          </div>
         }
       />
     );
@@ -212,7 +227,8 @@ export function RecipePlanner() {
             ) : (
               <>
                 <h2 className="text-xl font-semibold">추천 레시피</h2>
-                {current.profileNotice && (
+                {staleWarning}
+                {!staleForAllergies && current.profileNotice && (
                   <p role="note" className="rounded-lg bg-sky-50 p-3 text-sm text-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
                     {current.profileNotice}
                   </p>

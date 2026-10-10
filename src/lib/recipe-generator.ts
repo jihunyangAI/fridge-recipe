@@ -11,7 +11,7 @@ import {
   type JsonSpec,
 } from "./openrouter";
 import { ALLERGEN_GROUPS, expandAllergens, findAllergen, type Profile } from "./profile";
-import { PANTRY, type Recipe, type RecipeRequest } from "./recipes";
+import { PANTRY, RECIPE_LIMITS as L, type Recipe, type RecipeRequest } from "./recipes";
 
 export const MAX_MISSING = 2;
 const RECIPE_COUNT = 3;
@@ -194,6 +194,8 @@ export function makeOwnershipChecker(
   };
 }
 
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
 /**
  * 모델이 준 레시피에 서버 규칙을 적용한다. 보유 여부를 다시 계산하고,
  * 알레르기 재료가 들었거나 / 부족한 재료가 너무 많거나 / 보유 재료를 하나도 안 쓰거나 / 시간 조건을 넘거나 /
@@ -226,13 +228,19 @@ export function finalizeRecipes(
       continue;
     }
     // 모델이 지시를 어겨도 알레르기 재료가 든 레시피는 보여주지 않는다 (PRD_step3 3.2).
-    const allergen = findAllergen([c.title, ...c.ingredients.map((i) => i.name)], allergenTerms);
+    // 재료 이름은 한 글자 재료까지, 제목은 두 글자 이상 재료로 검사한다 (findAllergen 설명 참고).
+    const allergen =
+      findAllergen(c.ingredients.map((i) => i.name), allergenTerms) ?? findAllergen([c.title], allergenTerms, 2);
     if (allergen) {
       drop(c.title, `allergen "${allergen}"`);
       continue;
     }
 
-    const ingredients = c.ingredients.map((i) => ({ name: i.name, amount: i.amount, owned: isOwned(i.name) }));
+    const ingredients = c.ingredients.slice(0, L.ingredients).map((i) => ({
+      name: clip(i.name, L.ingredientText),
+      amount: i.amount && clip(i.amount, L.ingredientText),
+      owned: isOwned(i.name),
+    }));
     const missing = ingredients.filter((i) => !i.owned);
     if (missing.length > MAX_MISSING) {
       drop(c.title, `${missing.length} missing (${missing.map((i) => i.name).join(", ")})`);
@@ -254,14 +262,15 @@ export function finalizeRecipes(
     result.push({
       id: makeId(),
       title: c.title,
-      summary: c.summary ?? "",
-      cuisine: c.cuisine,
-      minutes: c.minutes ?? null,
-      difficulty: c.difficulty,
-      servings: c.servings && c.servings <= 10 ? c.servings : req.options.servings,
+      // 저장 검증(recipeSchema)과 같은 한도로 자른다.
+      summary: clip(c.summary ?? "", L.summary),
+      cuisine: c.cuisine && clip(c.cuisine, L.label),
+      minutes: c.minutes && c.minutes <= L.maxMinutes ? c.minutes : null,
+      difficulty: c.difficulty && clip(c.difficulty, L.label),
+      servings: c.servings && c.servings <= L.maxServings ? c.servings : req.options.servings,
       ingredients,
-      steps: c.steps.slice(0, 10),
-      tips: c.tips,
+      steps: c.steps.slice(0, L.steps).map((step) => clip(step, L.stepText)),
+      tips: c.tips && clip(c.tips, L.tips),
     });
     if (result.length === RECIPE_COUNT) break;
   }

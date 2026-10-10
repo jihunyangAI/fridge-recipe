@@ -17,7 +17,7 @@ const post = (body: unknown) =>
   POST(
     new Request("http://localhost/api/recipes", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", origin: "http://localhost", host: "localhost" },
       body: typeof body === "string" ? body : JSON.stringify(body),
     }),
   );
@@ -33,7 +33,7 @@ describe("POST /api/recipes", () => {
     generateRecipes.mockResolvedValue([{ id: "1", title: "계란찜" }]);
     const res = await post({ ingredients: [{ name: "계란" }] });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ recipes: [{ id: "1", title: "계란찜" }], profileNotice: null });
+    expect(await res.json()).toEqual({ recipes: [{ id: "1", title: "계란찜" }], profileNotice: null, appliedAllergies: [] });
     expect(generateRecipes.mock.calls[0][0]).toMatchObject({
       options: { maxMinutes: null, servings: 2, assumePantry: true },
       excludeTitles: [],
@@ -55,6 +55,7 @@ describe("POST /api/recipes", () => {
     await updateProfile(db, id, { nickname: "앨리스", allergies: ["계란"], dislikedIngredients: [], dietType: "일반", defaultServings: 2 });
     const res = await (await post({ ingredients: [{ name: "두부" }] })).json();
     expect(res.profileNotice).toBe(ALLERGY_NOTICE);
+    expect(res.appliedAllergies).toEqual(["계란"]);
     expect(generateRecipes.mock.calls.at(-1)?.[2]).toMatchObject({ allergies: ["계란"] });
   });
 
@@ -70,11 +71,23 @@ describe("POST /api/recipes", () => {
     expect(generateRecipes).not.toHaveBeenCalled();
   });
 
+  it("rejects cross-site requests before calling the model", async () => {
+    const res = await POST(
+      new Request("http://localhost/api/recipes", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain", origin: "https://evil.example", host: "localhost" },
+        body: JSON.stringify({ ingredients: [{ name: "계란" }] }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(generateRecipes).not.toHaveBeenCalled();
+  });
+
   it("returns an empty list with 200", async () => {
     generateRecipes.mockResolvedValue([]);
     const res = await post({ ingredients: [{ name: "자동차" }] });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ recipes: [], profileNotice: null });
+    expect(await res.json()).toEqual({ recipes: [], profileNotice: null, appliedAllergies: [] });
   });
 
   it("maps exhausted rate limiting to 503", async () => {

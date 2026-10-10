@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OpenRouterError } from "@/lib/openrouter";
 
+// api-auth가 @/auth(next-auth)를 불러오므로 테스트에서는 대신한다. 이 라우트는 로그인을 쓰지 않는다.
+vi.mock("@/auth", () => ({ auth: async () => null }));
+
 const recognizeIngredients = vi.fn();
 vi.mock("@/lib/recognize", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/recognize")>()),
@@ -12,10 +15,16 @@ const { ModelOutputError } = await import("@/lib/openrouter");
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 
-function post(file?: Blob, name = "fridge.jpg") {
+function post(file?: Blob, name = "fridge.jpg", origin: string | null = "http://localhost") {
   const form = new FormData();
   if (file) form.append("image", file, name);
-  return POST(new Request("http://localhost/api/recognize", { method: "POST", body: form }));
+  return POST(
+    new Request("http://localhost/api/recognize", {
+      method: "POST",
+      body: form,
+      headers: { origin: origin ?? "", host: "localhost" },
+    }),
+  );
 }
 
 describe("POST /api/recognize", () => {
@@ -31,6 +40,12 @@ describe("POST /api/recognize", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(result);
     expect(recognizeIngredients.mock.calls[0][0]).toMatch(/^data:image\/jpeg;base64,/);
+  });
+
+  it("rejects cross-site uploads before calling the model", async () => {
+    const res = await post(new Blob([JPEG], { type: "image/jpeg" }), "fridge.jpg", "https://evil.example");
+    expect(res.status).toBe(403);
+    expect(recognizeIngredients).not.toHaveBeenCalled();
   });
 
   it("rejects a missing file with 400", async () => {

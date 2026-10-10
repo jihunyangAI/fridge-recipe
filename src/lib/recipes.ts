@@ -55,28 +55,61 @@ export type RecipesResponse = {
   recipes: Recipe[];
   /** 로그인 사용자의 프로필(알레르기 등)을 반영했을 때 화면에 보여줄 안내 */
   profileNotice: string | null;
+  /** 이번 생성에 실제로 적용한 알레르기 (비로그인이면 빈 배열) */
+  appliedAllergies: string[];
 };
+
+/** 적용한 알레르기 목록을 비교용 문자열로 만든다 (순서 무관). */
+export const allergyKey = (allergies: string[]) => [...allergies].sort().join("|");
+
+/**
+ * 레시피 각 필드의 길이 한도. 생성(recipe-generator의 finalizeRecipes)은 이 한도로 자르고,
+ * 저장 검증(recipeSchema)은 같은 한도로 검사한다. 둘이 어긋나면 화면에는 보이는데 저장은 안 되는 레시피가 생긴다.
+ */
+export const RECIPE_LIMITS = {
+  title: 60,
+  summary: 300,
+  label: 20, // cuisine, difficulty
+  ingredientText: 60, // 재료 name, amount
+  ingredients: 40,
+  stepText: 500,
+  steps: 10,
+  tips: 500,
+  maxMinutes: 1440,
+  maxServings: 10,
+} as const;
+const L = RECIPE_LIMITS;
 
 /** 저장 요청으로 들어온 레시피를 다시 검증할 때 쓴다 (클라이언트가 보낸 값은 믿지 않는다). */
 export const recipeSchema = z.object({
   id: z.string().min(1).max(64),
-  title: z.string().trim().min(1).max(60),
-  summary: z.string().max(300),
-  cuisine: z.string().max(20).nullable(),
-  minutes: z.number().int().positive().max(1440).nullable(),
-  difficulty: z.string().max(20).nullable(),
-  servings: z.number().int().min(1).max(20),
+  title: z.string().trim().min(1).max(L.title),
+  summary: z.string().max(L.summary),
+  cuisine: z.string().max(L.label).nullable(),
+  minutes: z.number().int().positive().max(L.maxMinutes).nullable(),
+  difficulty: z.string().max(L.label).nullable(),
+  servings: z.number().int().min(1).max(L.maxServings),
   ingredients: z
-    .array(z.object({ name: z.string().min(1).max(60), amount: z.string().max(60).nullable(), owned: z.boolean() }))
+    .array(
+      z.object({
+        name: z.string().min(1).max(L.ingredientText),
+        amount: z.string().max(L.ingredientText).nullable(),
+        owned: z.boolean(),
+      }),
+    )
     .min(1)
-    .max(40),
-  steps: z.array(z.string().min(1).max(500)).min(1).max(15),
-  tips: z.string().max(500).nullable(),
+    .max(L.ingredients),
+  steps: z.array(z.string().min(1).max(L.stepText)).min(1).max(L.steps),
+  tips: z.string().max(L.tips).nullable(),
 });
 
 export const sourceIngredientsSchema = z
-  .array(z.object({ name: z.string().trim().min(1).max(30), quantity: z.string().max(30).nullable() }))
+  .array(z.object({ name: z.string().trim().min(1).max(30), quantity: z.string().trim().max(30).nullable() }))
   .max(50);
+
+/** 1단계에서 사용자가 고친 재료를 2·3단계 요청 한도(이름·양 30자)에 맞춘다. */
+export const toSourceIngredients = (items: { name: string; quantity: string | null }[]): SourceIngredient[] =>
+  items.map((i) => ({ name: i.name.trim().slice(0, 30), quantity: i.quantity?.trim().slice(0, 30) || null }));
 
 export type SourceIngredient = z.infer<typeof sourceIngredientsSchema>[number];
 

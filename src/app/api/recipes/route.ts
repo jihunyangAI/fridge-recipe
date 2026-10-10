@@ -1,4 +1,4 @@
-import { optionalUser } from "@/lib/api-auth";
+import { optionalUser, rejectCrossOrigin } from "@/lib/api-auth";
 import { errorJson, modelErrorResponse } from "@/lib/api-errors";
 import { getProfile } from "@/lib/db/repo";
 import type { Profile } from "@/lib/profile";
@@ -16,6 +16,10 @@ function noticeFor(profile: Profile | null): string | null {
 }
 
 export async function POST(request: Request) {
+  // 다른 사이트가 사용자의 브라우저로 이 API를 불러 OpenRouter 크레딧을 쓰지 못하게 한다.
+  const blocked = rejectCrossOrigin(request);
+  if (blocked) return blocked;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -34,7 +38,11 @@ export async function POST(request: Request) {
 
   try {
     const recipes = await generateRecipes(parsed.data, undefined, profile);
-    return Response.json({ recipes, profileNotice: noticeFor(profile) } satisfies RecipesResponse);
+    return Response.json({
+      recipes,
+      profileNotice: noticeFor(profile),
+      appliedAllergies: profile?.allergies ?? [],
+    } satisfies RecipesResponse);
   } catch (e) {
     return modelErrorResponse(e, "recipes", "레시피를 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
   }
